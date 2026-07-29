@@ -40,12 +40,21 @@ service cloud.firestore {
 
 ## 4. Backup
 
-No cabeçalho do app: **⬇ (Exportar backup)** baixa um `.json` com todos os
-materiais, mão de obra, produtos e tabelas de preço. **⬆ (Importar backup)**
-lê esse arquivo e recria os itens no Firestore (usando o mesmo ID salvo no
-arquivo — então restaurar não duplica). Recomendado: baixar um backup de
-vez em quando e guardar em algum lugar (e-mail pra você mesmo, Google
-Drive etc.), já que hoje é a única cópia de segurança fora do Firestore.
+Na aba **Ajustes** do app:
+
+- **Automático**: toda vez que alguém abre o app, ele confere se já passou 12h
+  desde o último backup — se sim, cria um novo sozinho. Como o site é
+  estático (sem servidor rodando o tempo todo), isso é o que dá pra fazer
+  sem custo extra; cobre bem o "2x ao dia" com uso normal. Se no futuro
+  quiserem um agendamento garantido mesmo com o app fechado, é possível,
+  mas exige Cloud Functions do Firebase num plano pago (Blaze).
+- **Manual**: botão "Fazer backup agora", a qualquer momento.
+- Cada backup salva **materiais, mão de obra, produtos e tabelas de preço em
+  registros separados**, com data/hora, e aparece no histórico da aba
+  Ajustes — de lá dá pra baixar `.json` de uma aba específica, restaurar
+  só aquela aba, ou excluir o backup do histórico.
+- **Importar de arquivo**: recuperação de desastre a partir de um `.json`
+  baixado anteriormente (útil se o próprio Firestore for perdido).
 
 ## 5. Publicar no GitHub Pages
 

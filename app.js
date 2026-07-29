@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot,
+  query, orderBy, limit, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
@@ -15,6 +16,7 @@ const colMateriais = collection(db, "materiais");
 const colMaoDeObra = collection(db, "maoDeObra");
 const colProdutos = collection(db, "produtos");
 const colTabelas = collection(db, "tabelasPreco");
+const colBackups = collection(db, "backups");
 
 const statusEl = document.getElementById("status");
 const setStatus = (text, cls) => {
@@ -67,44 +69,87 @@ document.getElementById("login-email").addEventListener("keydown", (e) => { if (
 document.getElementById("btn-logout").addEventListener("click", () => signOut(auth));
 
 // ---------- backup ----------
-document.getElementById("btn-backup").addEventListener("click", () => {
-  const backup = {
-    geradoEm: new Date().toISOString(),
-    materiais: state.materiais,
-    maoDeObra: state.maoDeObra,
-    produtos: state.produtos,
-    tabelas: state.tabelas,
-  };
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+const NOMES_COLECAO = { produtos: "Produtos", maoDeObra: "Mão de obra", materiais: "Matéria-prima", tabelasPreco: "Tabelas de preço" };
+const COLECOES_BACKUP = [
+  { chave: "produtos", get: () => state.produtos },
+  { chave: "maoDeObra", get: () => state.maoDeObra },
+  { chave: "materiais", get: () => state.materiais },
+  { chave: "tabelasPreco", get: () => state.tabelas },
+];
+
+async function restaurarColecao(colName, itens) {
+  for (const item of itens || []) {
+    const { id, ...rest } = item;
+    if (id) await setDoc(doc(db, colName, id), rest);
+    else await addDoc(collection(db, colName), rest);
+  }
+}
+
+// cria um novo "lote" de backup: 1 documento por aba, todos com o mesmo backupId
+async function criarBackup(tipo) {
+  const backupId = new Date().toISOString();
+  for (const c of COLECOES_BACKUP) {
+    await addDoc(colBackups, { backupId, colecao: c.chave, tipo, criadoEm: backupId, itens: c.get() });
+  }
+  return backupId;
+}
+
+async function dataUltimoBackup() {
+  const snap = await getDocs(query(colBackups, orderBy("criadoEm", "desc"), limit(1)));
+  if (snap.empty) return null;
+  return snap.docs[0].data().criadoEm;
+}
+
+// roda uma vez, depois que as 4 coleções principais já carregaram do Firestore:
+// se já se passaram 12h (ou nunca houve backup), gera um automaticamente
+async function verificarBackupAutomatico() {
+  try {
+    const ultimo = await dataUltimoBackup();
+    const DOZE_HORAS = 12 * 60 * 60 * 1000;
+    if (!ultimo || Date.now() - new Date(ultimo).getTime() > DOZE_HORAS) {
+      await criarBackup("automatico");
+      if (views.ajustes.classList.contains("active")) renderAjustes();
+    }
+  } catch (err) {
+    console.error("Falha ao verificar backup automático:", err);
+  }
+}
+
+async function carregarHistoricoBackups() {
+  const snap = await getDocs(query(colBackups, orderBy("criadoEm", "desc"), limit(80)));
+  const porLote = {};
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    if (!porLote[data.backupId]) porLote[data.backupId] = { backupId: data.backupId, tipo: data.tipo, criadoEm: data.criadoEm, partes: [] };
+    porLote[data.backupId].partes.push({ docId: d.id, colecao: data.colecao, itens: data.itens || [] });
+  });
+  return Object.values(porLote).sort((a, b) => b.criadoEm.localeCompare(a.criadoEm));
+}
+
+function baixarJson(nomeArquivo, dados) {
+  const blob = new Blob([JSON.stringify(dados, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `plastnova-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = nomeArquivo;
   a.click();
   URL.revokeObjectURL(url);
-});
+}
 
-document.getElementById("btn-restore").addEventListener("click", () => document.getElementById("backup-file").click());
+// restaurar/importar a partir de um arquivo .json baixado anteriormente (recuperação de desastre)
 document.getElementById("backup-file").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  if (!confirm("Isso vai sobrescrever os itens deste backup no banco de dados atual. Continuar?")) {
+  if (!confirm("Isso vai sobrescrever os itens deste arquivo no banco de dados atual. Continuar?")) {
     e.target.value = "";
     return;
   }
   try {
     const data = JSON.parse(await file.text());
-    const restaurar = async (colName, itens) => {
-      for (const item of itens || []) {
-        const { id, ...rest } = item;
-        if (id) await setDoc(doc(db, colName, id), rest);
-        else await addDoc(collection(db, colName), rest);
-      }
-    };
-    await restaurar("materiais", data.materiais);
-    await restaurar("maoDeObra", data.maoDeObra);
-    await restaurar("produtos", data.produtos);
-    await restaurar("tabelasPreco", data.tabelas);
+    await restaurarColecao("materiais", data.materiais);
+    await restaurarColecao("maoDeObra", data.maoDeObra);
+    await restaurarColecao("produtos", data.produtos);
+    await restaurarColecao("tabelasPreco", data.tabelas);
     alert("Backup restaurado com sucesso.");
   } catch (err) {
     console.error(err);
@@ -114,8 +159,11 @@ document.getElementById("backup-file").addEventListener("change", async (e) => {
   }
 });
 
+
 // ---------- estado local (espelha o Firestore em tempo real) ----------
 const state = { materiais: [], maoDeObra: [], produtos: [], tabelas: [] };
+const colecoesJaCarregadas = new Set();
+const TOTAL_COLECOES_PRINCIPAIS = 4; // materiais, maoDeObra, produtos, tabelas
 
 function listen(col, key, onUpdate) {
   onSnapshot(
@@ -124,6 +172,10 @@ function listen(col, key, onUpdate) {
       state[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setStatus("sincronizado", "ok");
       onUpdate();
+      if (!colecoesJaCarregadas.has(key)) {
+        colecoesJaCarregadas.add(key);
+        if (colecoesJaCarregadas.size === TOTAL_COLECOES_PRINCIPAIS) verificarBackupAutomatico();
+      }
     },
     (err) => {
       console.error(err);
@@ -149,6 +201,7 @@ const views = {
   materiais: document.getElementById("view-materiais"),
   maoDeObra: document.getElementById("view-maoDeObra"),
   tabelas: document.getElementById("view-tabelas"),
+  ajustes: document.getElementById("view-ajustes"),
 };
 document.getElementById("tabs").addEventListener("click", (e) => {
   const btn = e.target.closest(".tab");
@@ -158,6 +211,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   Object.entries(views).forEach(([k, el]) => el.classList.toggle("active", k === tab));
   if (tab === "produtos") produtoEditorId = null, renderProdutos();
   if (tab === "tabelas") renderTabelas();
+  if (tab === "ajustes") renderAjustes();
 });
 
 // =====================================================================
@@ -344,8 +398,8 @@ function renderTabelas() {
     } else if (tipoAtual === "marketplace") {
       campos.innerHTML = `
         <div class="row-2">
-          <div class="field"><label>Comissão do marketplace (%)</label><input id="tab-comissao" value="${t?.comissao ?? 16}" /></div>
-          <div class="field"><label>Margem desejada (%)</label><input id="tab-margem" value="${t?.margem ?? 20}" /></div>
+          <div class="field"><label>Comissão (%)</label><input id="tab-comissao" value="${t?.comissao ?? 16}" /></div>
+          <div class="field"><label>Margem (%)</label><input id="tab-margem" value="${t?.margem ?? 20}" /></div>
         </div>`;
     } else {
       campos.innerHTML = `<div class="field"><label>Margem sobre o preço (%)</label><input id="tab-valor" value="${t?.valor ?? 30}" /></div>`;
@@ -379,6 +433,110 @@ function descricaoTabela(t) {
   if (t.tipo === "marketplace") return `comissão ${numOr0(t.comissao)}% + margem ${numOr0(t.margem)}%`;
   return `margem ${numOr0(t.valor)}% sobre o preço`;
 }
+
+// =====================================================================
+// AJUSTES (backup e futuras configurações do sistema)
+// =====================================================================
+function formatarDataHora(iso) {
+  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function renderAjustes() {
+  const el = views.ajustes;
+  el.innerHTML = `
+    <div class="card" style="max-width:640px;margin-bottom:20px;">
+      <h3 style="margin-bottom:6px;">Backup</h3>
+      <p class="italic-muted" style="padding-top:0;">
+        Backup automático a cada 12h (conferido sempre que o app é aberto — cobre os
+        2x ao dia mesmo sem servidor rodando o tempo todo). Cada backup salva
+        <strong>materiais, mão de obra, produtos e tabelas de preço separadamente</strong>,
+        direto no Firestore.
+      </p>
+      <div class="btn-row" style="margin-top:12px;">
+        <button class="btn btn-primary" id="ajustes-backup-agora">⬇ Fazer backup agora</button>
+        <button class="btn btn-ghost" id="ajustes-restore-arquivo">⬆ Importar de arquivo</button>
+      </div>
+    </div>
+    <div class="card" style="max-width:760px;">
+      <h3 style="margin-bottom:12px;">Histórico de backups</h3>
+      <div id="lista-backups"><p class="italic-muted">Carregando…</p></div>
+    </div>`;
+
+  el.querySelector("#ajustes-backup-agora").onclick = async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Fazendo backup…";
+    await criarBackup("manual");
+    await carregarListaBackups();
+    e.target.disabled = false;
+    e.target.textContent = "⬇ Fazer backup agora";
+  };
+  el.querySelector("#ajustes-restore-arquivo").onclick = () => document.getElementById("backup-file").click();
+
+  await carregarListaBackups();
+}
+
+async function carregarListaBackups() {
+  const box = document.getElementById("lista-backups");
+  if (!box) return;
+  const lotes = await carregarHistoricoBackups();
+
+  if (lotes.length === 0) {
+    box.innerHTML = `<p class="italic-muted">Nenhum backup ainda. Clique em "Fazer backup agora" ou aguarde o automático.</p>`;
+    return;
+  }
+
+  box.innerHTML = lotes.map((lote) => `
+    <div class="backup-lote">
+      <div class="backup-lote-head">
+        <span class="backup-data">${formatarDataHora(lote.criadoEm)}</span>
+        <span class="backup-badge ${lote.tipo === "manual" ? "manual" : "auto"}">${lote.tipo === "manual" ? "Manual" : "Automático"}</span>
+        <button class="icon-btn danger" data-del-lote="${lote.backupId}" title="Excluir este backup">🗑</button>
+      </div>
+      <div class="backup-partes">
+        ${lote.partes.map((p) => `
+          <div class="backup-parte">
+            <span>${esc(NOMES_COLECAO[p.colecao] || p.colecao)} <span class="faint-count">(${p.itens.length})</span></span>
+            <div class="backup-parte-acoes">
+              <button class="icon-btn" data-baixar-parte="${p.docId}" title="Baixar esta aba">⬇</button>
+              <button class="icon-btn" data-restaurar-parte="${p.docId}" title="Restaurar esta aba">↺</button>
+            </div>
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+
+  // guarda os lotes em memória pra achar rapidamente ao clicar nos botões
+  box.dataset.ready = "1";
+  window.__ultimosLotesBackup = lotes;
+
+  box.querySelectorAll("[data-baixar-parte]").forEach((b) => b.onclick = () => {
+    const parte = achaParteBackup(b.dataset.baixarParte);
+    if (!parte) return;
+    baixarJson(`plastnova-${parte.colecao}-${new Date().toISOString().slice(0, 10)}.json`, parte.itens);
+  });
+  box.querySelectorAll("[data-restaurar-parte]").forEach((b) => b.onclick = async () => {
+    const parte = achaParteBackup(b.dataset.restaurarParte);
+    if (!parte) return;
+    if (!confirm(`Restaurar "${NOMES_COLECAO[parte.colecao] || parte.colecao}" a partir deste backup? Isso sobrescreve os itens atuais dessa aba.`)) return;
+    await restaurarColecao(parte.colecao, parte.itens);
+    alert("Restaurado com sucesso.");
+  });
+  box.querySelectorAll("[data-del-lote]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Excluir este backup do histórico? Isso não afeta os dados atuais, só remove esta cópia salva.")) return;
+    const lote = lotes.find((l) => l.backupId === b.dataset.delLote);
+    if (!lote) return;
+    for (const p of lote.partes) await deleteDoc(doc(db, "backups", p.docId));
+    await carregarListaBackups();
+  });
+}
+
+function achaParteBackup(docId) {
+  for (const lote of window.__ultimosLotesBackup || []) {
+    const p = lote.partes.find((x) => x.docId === docId);
+    if (p) return p;
+  }
+  return null;
+}
+
 
 // =====================================================================
 // PRODUTOS (com tamanhos/variações + itens gerais)
@@ -845,6 +1003,7 @@ function iniciarListeners() {
   renderMateriais();
   renderMaoDeObra();
   renderTabelas();
+  renderAjustes();
 }
 
 if ("serviceWorker" in navigator) {
