@@ -270,34 +270,34 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === btn));
   Object.entries(views).forEach(([k, el]) => el.classList.toggle("active", k === tab));
   if (tab === "produtos") produtoEditorId = null, renderProdutos();
-  if (tab === "tabelas") renderTabelas();
+  if (tab === "materiais") materialEditId = null, renderMateriais();
+  if (tab === "maoDeObra") laborEditId = null, renderMaoDeObra();
+  if (tab === "tabelas") tabelaEditId = null, renderTabelas();
   if (tab === "ajustes") renderAjustes();
 });
 
 // =====================================================================
 // MATERIAIS
 // =====================================================================
-let materialEditId = null;
+let materialEditId = null; // id do material em edição INLINE na tabela (não mexe no formulário do topo)
 function renderMateriais() {
   const el = views.materiais;
-  const m = state.materiais.find((x) => x.id === materialEditId);
   el.innerHTML = `
     <div class="card cadastro-card">
-      <h3 style="margin-bottom:16px;">${materialEditId ? "Editar material" : "Novo material"}</h3>
+      <h3 style="margin-bottom:16px;">Novo material</h3>
       <div class="row-2">
         <div class="field"><label>Nome</label>
-          <input id="mat-nome" placeholder="Ex: Tecido algodão" value="${esc(m?.nome || "")}" />
+          <input id="mat-nome" placeholder="Ex: Tecido algodão" />
         </div>
         <div class="field"><label>Unidade</label>
-          <select id="mat-unidade">${UNIDADES.map((u) => `<option value="${u}" ${m?.unidade === u ? "selected" : ""}>${u}</option>`).join("")}</select>
+          <select id="mat-unidade">${UNIDADES.map((u) => `<option value="${u}">${u}</option>`).join("")}</select>
         </div>
       </div>
       <div class="field" style="max-width:220px;"><label>Custo / unidade (até 5 casas)</label>
-        <input id="mat-custo" placeholder="0,00000" value="${m ? m.custoUnitario : ""}" />
+        <input id="mat-custo" placeholder="0,00000" />
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" id="mat-submit">${materialEditId ? "Salvar" : "Adicionar"}</button>
-        ${materialEditId ? `<button class="btn btn-ghost" id="mat-cancel">Cancelar</button>` : ""}
+        <button class="btn btn-primary" id="mat-submit">Adicionar</button>
       </div>
     </div>
 
@@ -309,15 +309,21 @@ function renderMateriais() {
     ], "Buscar material…")}
     <div id="materiais-lista"></div>`;
 
-  el.querySelector("#mat-submit").onclick = async () => {
+  const btn = el.querySelector("#mat-submit");
+  btn.onclick = async () => {
     const nome = el.querySelector("#mat-nome").value.trim();
     if (!nome) return;
     const payload = { nome, unidade: el.querySelector("#mat-unidade").value, custoUnitario: numOr0(el.querySelector("#mat-custo").value) };
-    if (materialEditId) await updateDoc(doc(db, "materiais", materialEditId), payload);
-    else await addDoc(colMateriais, payload);
-    materialEditId = null;
+    btn.disabled = true;
+    try {
+      await addDoc(colMateriais, payload);
+      el.querySelector("#mat-nome").value = "";
+      el.querySelector("#mat-custo").value = "";
+      el.querySelector("#mat-nome").focus();
+    } finally {
+      btn.disabled = false;
+    }
   };
-  el.querySelector("#mat-cancel")?.addEventListener("click", () => { materialEditId = null; renderMateriais(); });
   ligarBarraBusca(el, "materiais", renderListaMateriaisCadastrados);
   renderListaMateriaisCadastrados();
 }
@@ -341,21 +347,49 @@ function renderListaMateriaisCadastrados() {
   box.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Material</th><th>Unidade</th><th style="text-align:right">Custo/un</th><th></th></tr></thead>
       <tbody>
-        ${lista.map((mm) => `
+        ${lista.map((mm) => mm.id === materialEditId ? `
+          <tr class="linha-edicao">
+            <td><input class="qty" style="width:100%" data-inline-nome value="${esc(mm.nome)}" /></td>
+            <td><select data-inline-unidade>${UNIDADES.map((u) => `<option value="${u}" ${mm.unidade === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
+            <td><input class="qty" style="width:100%" data-inline-custo value="${mm.custoUnitario}" /></td>
+            <td><div class="actions-cell">
+              <button class="icon-btn" data-salvar="${mm.id}" title="Salvar">💾</button>
+              <button class="icon-btn" data-cancelar title="Cancelar">✕</button>
+            </div></td>
+          </tr>` : `
           <tr>
             <td>${esc(mm.nome)}</td>
             <td style="color:var(--muted)">${esc(mm.unidade)}</td>
             <td class="num">${brl5(mm.custoUnitario)}</td>
             <td><div class="actions-cell">
-              <button class="icon-btn" data-edit="${mm.id}">✎</button>
-              <button class="icon-btn danger" data-del="${mm.id}">🗑</button>
+              <button class="icon-btn" data-edit="${mm.id}" title="Editar">✎</button>
+              <button class="icon-btn danger" data-del="${mm.id}" title="Excluir">🗑</button>
             </div></td>
           </tr>`).join("")}
       </tbody>
     </table></div>`;
 
-  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { materialEditId = b.dataset.edit; renderMateriais(); });
+  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { materialEditId = b.dataset.edit; renderListaMateriaisCadastrados(); });
+  box.querySelectorAll("[data-cancelar]").forEach((b) => b.onclick = () => { materialEditId = null; renderListaMateriaisCadastrados(); });
   box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "materiais", b.dataset.del)); });
+  box.querySelectorAll("[data-salvar]").forEach((b) => b.onclick = async () => {
+    const linha = b.closest("tr");
+    const nome = linha.querySelector("[data-inline-nome]").value.trim();
+    if (!nome) return;
+    const payload = {
+      nome,
+      unidade: linha.querySelector("[data-inline-unidade]").value,
+      custoUnitario: numOr0(linha.querySelector("[data-inline-custo]").value),
+    };
+    b.disabled = true;
+    linha.querySelector("[data-cancelar]").disabled = true;
+    try {
+      await updateDoc(doc(db, "materiais", b.dataset.salvar), payload);
+      materialEditId = null;
+    } finally {
+      renderListaMateriaisCadastrados();
+    }
+  });
 }
 
 // =====================================================================
@@ -364,24 +398,22 @@ function renderListaMateriaisCadastrados() {
 let laborEditId = null;
 function renderMaoDeObra() {
   const el = views.maoDeObra;
-  const it = state.maoDeObra.find((x) => x.id === laborEditId);
   el.innerHTML = `
     <div class="card cadastro-card">
-      <h3 style="margin-bottom:16px;">${laborEditId ? "Editar item" : "Novo item de mão de obra"}</h3>
+      <h3 style="margin-bottom:16px;">Novo item de mão de obra</h3>
       <div class="field"><label>Nome / função</label>
-        <input id="lab-nome" placeholder="Ex: Costureira, Solda, Corte" value="${esc(it?.nome || "")}" />
+        <input id="lab-nome" placeholder="Ex: Costureira, Solda, Corte" />
       </div>
       <div class="row-2" style="max-width:460px;">
         <div class="field"><label>Unidade de cobrança</label>
-          <select id="lab-unidade">${UNIDADES_MAO.map((u) => `<option value="${u}" ${(it?.unidade || "hora") === u ? "selected" : ""}>${u}</option>`).join("")}</select>
+          <select id="lab-unidade">${UNIDADES_MAO.map((u) => `<option value="${u}">${u}</option>`).join("")}</select>
         </div>
         <div class="field"><label>Valor / unidade (até 5 casas)</label>
-          <input id="lab-valor" placeholder="0,00000" value="${it ? it.valor : ""}" />
+          <input id="lab-valor" placeholder="0,00000" />
         </div>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" id="lab-submit">${laborEditId ? "Salvar" : "Adicionar"}</button>
-        ${laborEditId ? `<button class="btn btn-ghost" id="lab-cancel">Cancelar</button>` : ""}
+        <button class="btn btn-primary" id="lab-submit">Adicionar</button>
       </div>
     </div>
 
@@ -393,15 +425,21 @@ function renderMaoDeObra() {
     ], "Buscar item de mão de obra…")}
     <div id="mao-lista"></div>`;
 
-  el.querySelector("#lab-submit").onclick = async () => {
+  const btn = el.querySelector("#lab-submit");
+  btn.onclick = async () => {
     const nome = el.querySelector("#lab-nome").value.trim();
     if (!nome) return;
     const payload = { nome, unidade: el.querySelector("#lab-unidade").value, valor: numOr0(el.querySelector("#lab-valor").value) };
-    if (laborEditId) await updateDoc(doc(db, "maoDeObra", laborEditId), payload);
-    else await addDoc(colMaoDeObra, payload);
-    laborEditId = null;
+    btn.disabled = true;
+    try {
+      await addDoc(colMaoDeObra, payload);
+      el.querySelector("#lab-nome").value = "";
+      el.querySelector("#lab-valor").value = "";
+      el.querySelector("#lab-nome").focus();
+    } finally {
+      btn.disabled = false;
+    }
   };
-  el.querySelector("#lab-cancel")?.addEventListener("click", () => { laborEditId = null; renderMaoDeObra(); });
   ligarBarraBusca(el, "maoDeObra", renderListaMaoCadastrada);
   renderListaMaoCadastrada();
 }
@@ -425,21 +463,49 @@ function renderListaMaoCadastrada() {
   box.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Item</th><th>Unidade</th><th style="text-align:right">Valor</th><th></th></tr></thead>
       <tbody>
-        ${lista.map((ll) => `
+        ${lista.map((ll) => ll.id === laborEditId ? `
+          <tr class="linha-edicao">
+            <td><input class="qty" style="width:100%" data-inline-nome value="${esc(ll.nome)}" /></td>
+            <td><select data-inline-unidade>${UNIDADES_MAO.map((u) => `<option value="${u}" ${ll.unidade === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
+            <td><input class="qty" style="width:100%" data-inline-valor value="${ll.valor}" /></td>
+            <td><div class="actions-cell">
+              <button class="icon-btn" data-salvar="${ll.id}" title="Salvar">💾</button>
+              <button class="icon-btn" data-cancelar title="Cancelar">✕</button>
+            </div></td>
+          </tr>` : `
           <tr>
             <td>${esc(ll.nome)}</td>
             <td style="color:var(--muted)">${esc(ll.unidade)}</td>
             <td class="num">${brl5(ll.valor)}/${esc(ll.unidade)}</td>
             <td><div class="actions-cell">
-              <button class="icon-btn" data-edit="${ll.id}">✎</button>
-              <button class="icon-btn danger" data-del="${ll.id}">🗑</button>
+              <button class="icon-btn" data-edit="${ll.id}" title="Editar">✎</button>
+              <button class="icon-btn danger" data-del="${ll.id}" title="Excluir">🗑</button>
             </div></td>
           </tr>`).join("")}
       </tbody>
     </table></div>`;
 
-  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { laborEditId = b.dataset.edit; renderMaoDeObra(); });
+  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { laborEditId = b.dataset.edit; renderListaMaoCadastrada(); });
+  box.querySelectorAll("[data-cancelar]").forEach((b) => b.onclick = () => { laborEditId = null; renderListaMaoCadastrada(); });
   box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "maoDeObra", b.dataset.del)); });
+  box.querySelectorAll("[data-salvar]").forEach((b) => b.onclick = async () => {
+    const linha = b.closest("tr");
+    const nome = linha.querySelector("[data-inline-nome]").value.trim();
+    if (!nome) return;
+    const payload = {
+      nome,
+      unidade: linha.querySelector("[data-inline-unidade]").value,
+      valor: numOr0(linha.querySelector("[data-inline-valor]").value),
+    };
+    b.disabled = true;
+    linha.querySelector("[data-cancelar]").disabled = true;
+    try {
+      await updateDoc(doc(db, "maoDeObra", b.dataset.salvar), payload);
+      laborEditId = null;
+    } finally {
+      renderListaMaoCadastrada();
+    }
+  });
 }
 
 // =====================================================================
@@ -501,7 +567,7 @@ function renderTabelas() {
   renderCampos(tipo);
   el.querySelector("#tab-tipo").addEventListener("change", (e) => renderCampos(e.target.value));
 
-  el.querySelector("#tab-submit").onclick = async () => {
+  el.querySelector("#tab-submit").onclick = async (ev) => {
     const nome = el.querySelector("#tab-nome").value.trim();
     if (!nome) return;
     const tipoSel = el.querySelector("#tab-tipo").value;
@@ -512,9 +578,11 @@ function renderTabelas() {
       payload.margem = numOr0(el.querySelector("#tab-margem").value);
     } else payload.valor = numOr0(el.querySelector("#tab-valor").value);
 
+    ev.currentTarget.disabled = true;
     if (tabelaEditId) await updateDoc(doc(db, "tabelasPreco", tabelaEditId), payload);
     else await addDoc(colTabelas, payload);
     tabelaEditId = null;
+    renderTabelas();
   };
   el.querySelector("#tab-cancel")?.addEventListener("click", () => { tabelaEditId = null; renderTabelas(); });
   el.querySelector("#imprimir-tudo").onclick = () => imprimirTabelaGeral();
@@ -1050,7 +1118,7 @@ function renderProdutoEditor(el) {
   el.querySelectorAll("[data-geral='mao'][data-mao-qty]").forEach((i) => i.oninput = () => { draft.itensMaoGerais[+i.dataset.maoQty].quantidade = i.value; renderProdutoEditor(el); });
   el.querySelectorAll("[data-geral='mao'][data-mao-del]").forEach((b) => b.onclick = () => { draft.itensMaoGerais.splice(+b.dataset.maoDel, 1); renderProdutoEditor(el); });
 
-  el.querySelector("#prod-salvar").onclick = async () => {
+  el.querySelector("#prod-salvar").onclick = async (ev) => {
     syncSimple();
     const payload = {
       nome: draft.nome.trim() || "Produto sem nome",
@@ -1067,6 +1135,7 @@ function renderProdutoEditor(el) {
         overridesMao: v.overridesMao || {},
       })),
     };
+    ev.currentTarget.disabled = true;
     if (isNew) await addDoc(colProdutos, payload);
     else await updateDoc(doc(db, "produtos", produtoEditorId), payload);
     produtoEditorId = null; draft = null;
@@ -1151,19 +1220,18 @@ function imprimirTabelaGeral() {
 // ---------- boot (só roda depois do login) ----------
 function iniciarListeners() {
   listen(colMateriais, "materiais", () => {
-    if (views.materiais.classList.contains("active")) renderMateriais();
-    if (views.produtos.classList.contains("active")) renderProdutos();
+    renderListaMateriaisCadastrados();
+    renderListaProdutosCadastrados();
   });
   listen(colMaoDeObra, "maoDeObra", () => {
-    if (views.maoDeObra.classList.contains("active")) renderMaoDeObra();
-    if (views.produtos.classList.contains("active")) renderProdutos();
+    renderListaMaoCadastrada();
+    renderListaProdutosCadastrados();
   });
   listen(colProdutos, "produtos", () => {
-    if (views.produtos.classList.contains("active") && produtoEditorId === null) renderProdutos();
+    if (produtoEditorId === null) renderListaProdutosCadastrados();
   });
   listen(colTabelas, "tabelas", () => {
-    if (views.tabelas.classList.contains("active")) renderTabelas();
-    if (views.produtos.classList.contains("active")) renderProdutos();
+    renderListaTabelasCadastradas();
   });
 
   renderProdutos();
