@@ -68,6 +68,20 @@ document.getElementById("login-senha").addEventListener("keydown", (e) => { if (
 document.getElementById("login-email").addEventListener("keydown", (e) => { if (e.key === "Enter") tentarLogin(); });
 document.getElementById("btn-logout").addEventListener("click", () => signOut(auth));
 
+// ---------- tema claro/escuro ----------
+const btnTema = document.getElementById("btn-tema");
+function aplicarTema(tema) {
+  if (tema === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  btnTema.textContent = tema === "light" ? "☀️" : "🌙";
+  localStorage.setItem("plastnova-tema", tema);
+}
+aplicarTema(localStorage.getItem("plastnova-tema") === "light" ? "light" : "dark");
+btnTema.addEventListener("click", () => {
+  const atual = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  aplicarTema(atual === "light" ? "dark" : "light");
+});
+
 // ---------- backup ----------
 const NOMES_COLECAO = { produtos: "Produtos", maoDeObra: "Mão de obra", materiais: "Matéria-prima", tabelasPreco: "Tabelas de preço" };
 const COLECOES_BACKUP = [
@@ -186,7 +200,10 @@ function listen(col, key, onUpdate) {
 
 // ---------- helpers ----------
 const uidTmp = () => "tmp-" + Math.random().toString(36).slice(2, 9);
+// preços de produtos/tabelas: sempre 2 casas, arredondado
 const brl = (n) => (isFinite(n) ? n : 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// custo unitário de matéria-prima/mão de obra: até 5 casas, sem arredondar
+const brl5 = (n) => (isFinite(n) ? n : 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 5 });
 const numOr0 = (v) => {
   const n = parseFloat(String(v).replace(",", "."));
   return isFinite(n) ? n : 0;
@@ -194,6 +211,49 @@ const numOr0 = (v) => {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const UNIDADES = ["un", "kg", "g", "m", "cm", "L", "mL", "m²", "pacote"];
 const UNIDADES_MAO = ["hora", "minuto", "un", "kg", "g", "m", "cm", "m²", "L", "mL", "pacote"];
+
+// ---------- busca e ordenação das tabelas ----------
+const filtros = {
+  materiais: { busca: "", ordem: "nome-asc" },
+  maoDeObra: { busca: "", ordem: "nome-asc" },
+  tabelas: { busca: "", ordem: "nome-asc" },
+  produtos: { busca: "", ordem: "nome-asc" },
+};
+
+function aplicarBuscaOrdem(lista, chaveFiltro, camposBusca, comparadores) {
+  const f = filtros[chaveFiltro];
+  let resultado = lista;
+  if (f.busca.trim()) {
+    const termo = f.busca.trim().toLowerCase();
+    resultado = resultado.filter((item) => camposBusca.some((campo) => String(item[campo] ?? "").toLowerCase().includes(termo)));
+  }
+  const [campo, dir] = f.ordem.split("-");
+  const cmp = comparadores[campo];
+  if (cmp) {
+    resultado = [...resultado].sort((a, b) => (dir === "asc" ? cmp(a, b) : cmp(b, a)));
+  }
+  return resultado;
+}
+
+// barra de busca + ordenação, reutilizada nas abas de cadastro
+function renderBarraBusca(chaveFiltro, opcoesOrdem, placeholder) {
+  const f = filtros[chaveFiltro];
+  return `
+    <div class="busca-bar">
+      <input type="text" class="busca-input" data-busca="${chaveFiltro}" placeholder="${placeholder || "Buscar…"}" value="${esc(f.busca)}" />
+      <select class="busca-ordem" data-ordem="${chaveFiltro}">
+        ${opcoesOrdem.map((o) => `<option value="${o.value}" ${f.ordem === o.value ? "selected" : ""}>${o.label}</option>`).join("")}
+      </select>
+    </div>`;
+}
+
+// liga os eventos da barra de busca/ordenação a uma função de re-render
+function ligarBarraBusca(el, chaveFiltro, rerender) {
+  const inputBusca = el.querySelector(`[data-busca="${chaveFiltro}"]`);
+  const selectOrdem = el.querySelector(`[data-ordem="${chaveFiltro}"]`);
+  inputBusca?.addEventListener("input", () => { filtros[chaveFiltro].busca = inputBusca.value; rerender(); });
+  selectOrdem?.addEventListener("change", () => { filtros[chaveFiltro].ordem = selectOrdem.value; rerender(); });
+}
 
 // ---------- navegação de abas ----------
 const views = {
@@ -222,46 +282,32 @@ function renderMateriais() {
   const el = views.materiais;
   const m = state.materiais.find((x) => x.id === materialEditId);
   el.innerHTML = `
-    <div class="split">
-      <div class="card">
-        <h3 style="margin-bottom:16px;">${materialEditId ? "Editar material" : "Novo material"}</h3>
+    <div class="card cadastro-card">
+      <h3 style="margin-bottom:16px;">${materialEditId ? "Editar material" : "Novo material"}</h3>
+      <div class="row-2">
         <div class="field"><label>Nome</label>
           <input id="mat-nome" placeholder="Ex: Tecido algodão" value="${esc(m?.nome || "")}" />
         </div>
-        <div class="row-2">
-          <div class="field"><label>Unidade</label>
-            <select id="mat-unidade">${UNIDADES.map((u) => `<option value="${u}" ${m?.unidade === u ? "selected" : ""}>${u}</option>`).join("")}</select>
-          </div>
-          <div class="field"><label>Custo / unidade</label>
-            <input id="mat-custo" placeholder="0,00" value="${m ? m.custoUnitario : ""}" />
-          </div>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="mat-submit" style="flex:1">${materialEditId ? "Salvar" : "Adicionar"}</button>
-          ${materialEditId ? `<button class="btn btn-ghost" id="mat-cancel">Cancelar</button>` : ""}
+        <div class="field"><label>Unidade</label>
+          <select id="mat-unidade">${UNIDADES.map((u) => `<option value="${u}" ${m?.unidade === u ? "selected" : ""}>${u}</option>`).join("")}</select>
         </div>
       </div>
-      <div>
-        ${state.materiais.length === 0
-          ? `<div class="empty"><div class="t">Nenhum material cadastrado</div><div class="s">Adicione o primeiro material ao lado.</div></div>`
-          : `<div class="table-wrap"><table>
-              <thead><tr><th>Material</th><th>Unidade</th><th style="text-align:right">Custo/un</th><th></th></tr></thead>
-              <tbody>
-                ${state.materiais.map((mm) => `
-                  <tr>
-                    <td>${esc(mm.nome)}</td>
-                    <td style="color:var(--muted)">${esc(mm.unidade)}</td>
-                    <td class="num">${brl(mm.custoUnitario)}</td>
-                    <td><div class="actions-cell">
-                      <button class="icon-btn" data-edit="${mm.id}">✎</button>
-                      <button class="icon-btn danger" data-del="${mm.id}">🗑</button>
-                    </div></td>
-                  </tr>`).join("")}
-              </tbody>
-            </table></div>`
-        }
+      <div class="field" style="max-width:220px;"><label>Custo / unidade (até 5 casas)</label>
+        <input id="mat-custo" placeholder="0,00000" value="${m ? m.custoUnitario : ""}" />
       </div>
-    </div>`;
+      <div class="btn-row">
+        <button class="btn btn-primary" id="mat-submit">${materialEditId ? "Salvar" : "Adicionar"}</button>
+        ${materialEditId ? `<button class="btn btn-ghost" id="mat-cancel">Cancelar</button>` : ""}
+      </div>
+    </div>
+
+    ${renderBarraBusca("materiais", [
+      { value: "nome-asc", label: "Nome (A–Z)" },
+      { value: "nome-desc", label: "Nome (Z–A)" },
+      { value: "custoUnitario-asc", label: "Custo (menor–maior)" },
+      { value: "custoUnitario-desc", label: "Custo (maior–menor)" },
+    ], "Buscar material…")}
+    <div id="materiais-lista"></div>`;
 
   el.querySelector("#mat-submit").onclick = async () => {
     const nome = el.querySelector("#mat-nome").value.trim();
@@ -272,8 +318,44 @@ function renderMateriais() {
     materialEditId = null;
   };
   el.querySelector("#mat-cancel")?.addEventListener("click", () => { materialEditId = null; renderMateriais(); });
-  el.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { materialEditId = b.dataset.edit; renderMateriais(); });
-  el.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "materiais", b.dataset.del)); });
+  ligarBarraBusca(el, "materiais", renderListaMateriaisCadastrados);
+  renderListaMateriaisCadastrados();
+}
+
+function renderListaMateriaisCadastrados() {
+  const box = document.getElementById("materiais-lista");
+  if (!box) return;
+  const lista = aplicarBuscaOrdem(state.materiais, "materiais", ["nome", "unidade"], {
+    nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"),
+    custoUnitario: (a, b) => a.custoUnitario - b.custoUnitario,
+  });
+
+  if (state.materiais.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nenhum material cadastrado</div><div class="s">Adicione o primeiro material acima.</div></div>`;
+    return;
+  }
+  if (lista.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nada encontrado</div><div class="s">Tente outro termo de busca.</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Material</th><th>Unidade</th><th style="text-align:right">Custo/un</th><th></th></tr></thead>
+      <tbody>
+        ${lista.map((mm) => `
+          <tr>
+            <td>${esc(mm.nome)}</td>
+            <td style="color:var(--muted)">${esc(mm.unidade)}</td>
+            <td class="num">${brl5(mm.custoUnitario)}</td>
+            <td><div class="actions-cell">
+              <button class="icon-btn" data-edit="${mm.id}">✎</button>
+              <button class="icon-btn danger" data-del="${mm.id}">🗑</button>
+            </div></td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+
+  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { materialEditId = b.dataset.edit; renderMateriais(); });
+  box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "materiais", b.dataset.del)); });
 }
 
 // =====================================================================
@@ -284,46 +366,32 @@ function renderMaoDeObra() {
   const el = views.maoDeObra;
   const it = state.maoDeObra.find((x) => x.id === laborEditId);
   el.innerHTML = `
-    <div class="split">
-      <div class="card">
-        <h3 style="margin-bottom:16px;">${laborEditId ? "Editar item" : "Novo item de mão de obra"}</h3>
-        <div class="field"><label>Nome / função</label>
-          <input id="lab-nome" placeholder="Ex: Costureira, Solda, Corte" value="${esc(it?.nome || "")}" />
+    <div class="card cadastro-card">
+      <h3 style="margin-bottom:16px;">${laborEditId ? "Editar item" : "Novo item de mão de obra"}</h3>
+      <div class="field"><label>Nome / função</label>
+        <input id="lab-nome" placeholder="Ex: Costureira, Solda, Corte" value="${esc(it?.nome || "")}" />
+      </div>
+      <div class="row-2" style="max-width:460px;">
+        <div class="field"><label>Unidade de cobrança</label>
+          <select id="lab-unidade">${UNIDADES_MAO.map((u) => `<option value="${u}" ${(it?.unidade || "hora") === u ? "selected" : ""}>${u}</option>`).join("")}</select>
         </div>
-        <div class="row-2">
-          <div class="field"><label>Unidade de cobrança</label>
-            <select id="lab-unidade">${UNIDADES_MAO.map((u) => `<option value="${u}" ${(it?.unidade || "hora") === u ? "selected" : ""}>${u}</option>`).join("")}</select>
-          </div>
-          <div class="field"><label>Valor / unidade</label>
-            <input id="lab-valor" placeholder="0,00" value="${it ? it.valor : ""}" />
-          </div>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="lab-submit" style="flex:1">${laborEditId ? "Salvar" : "Adicionar"}</button>
-          ${laborEditId ? `<button class="btn btn-ghost" id="lab-cancel">Cancelar</button>` : ""}
+        <div class="field"><label>Valor / unidade (até 5 casas)</label>
+          <input id="lab-valor" placeholder="0,00000" value="${it ? it.valor : ""}" />
         </div>
       </div>
-      <div>
-        ${state.maoDeObra.length === 0
-          ? `<div class="empty"><div class="t">Nenhum item de mão de obra</div><div class="s">Cadastre funções e seus valores ao lado.</div></div>`
-          : `<div class="table-wrap"><table>
-              <thead><tr><th>Item</th><th>Unidade</th><th style="text-align:right">Valor</th><th></th></tr></thead>
-              <tbody>
-                ${state.maoDeObra.map((ll) => `
-                  <tr>
-                    <td>${esc(ll.nome)}</td>
-                    <td style="color:var(--muted)">${esc(ll.unidade)}</td>
-                    <td class="num">${brl(ll.valor)}/${esc(ll.unidade)}</td>
-                    <td><div class="actions-cell">
-                      <button class="icon-btn" data-edit="${ll.id}">✎</button>
-                      <button class="icon-btn danger" data-del="${ll.id}">🗑</button>
-                    </div></td>
-                  </tr>`).join("")}
-              </tbody>
-            </table></div>`
-        }
+      <div class="btn-row">
+        <button class="btn btn-primary" id="lab-submit">${laborEditId ? "Salvar" : "Adicionar"}</button>
+        ${laborEditId ? `<button class="btn btn-ghost" id="lab-cancel">Cancelar</button>` : ""}
       </div>
-    </div>`;
+    </div>
+
+    ${renderBarraBusca("maoDeObra", [
+      { value: "nome-asc", label: "Nome (A–Z)" },
+      { value: "nome-desc", label: "Nome (Z–A)" },
+      { value: "valor-asc", label: "Valor (menor–maior)" },
+      { value: "valor-desc", label: "Valor (maior–menor)" },
+    ], "Buscar item de mão de obra…")}
+    <div id="mao-lista"></div>`;
 
   el.querySelector("#lab-submit").onclick = async () => {
     const nome = el.querySelector("#lab-nome").value.trim();
@@ -334,8 +402,44 @@ function renderMaoDeObra() {
     laborEditId = null;
   };
   el.querySelector("#lab-cancel")?.addEventListener("click", () => { laborEditId = null; renderMaoDeObra(); });
-  el.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { laborEditId = b.dataset.edit; renderMaoDeObra(); });
-  el.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "maoDeObra", b.dataset.del)); });
+  ligarBarraBusca(el, "maoDeObra", renderListaMaoCadastrada);
+  renderListaMaoCadastrada();
+}
+
+function renderListaMaoCadastrada() {
+  const box = document.getElementById("mao-lista");
+  if (!box) return;
+  const lista = aplicarBuscaOrdem(state.maoDeObra, "maoDeObra", ["nome", "unidade"], {
+    nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"),
+    valor: (a, b) => a.valor - b.valor,
+  });
+
+  if (state.maoDeObra.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nenhum item de mão de obra</div><div class="s">Cadastre funções e seus valores acima.</div></div>`;
+    return;
+  }
+  if (lista.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nada encontrado</div><div class="s">Tente outro termo de busca.</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Item</th><th>Unidade</th><th style="text-align:right">Valor</th><th></th></tr></thead>
+      <tbody>
+        ${lista.map((ll) => `
+          <tr>
+            <td>${esc(ll.nome)}</td>
+            <td style="color:var(--muted)">${esc(ll.unidade)}</td>
+            <td class="num">${brl5(ll.valor)}/${esc(ll.unidade)}</td>
+            <td><div class="actions-cell">
+              <button class="icon-btn" data-edit="${ll.id}">✎</button>
+              <button class="icon-btn danger" data-del="${ll.id}">🗑</button>
+            </div></td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+
+  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { laborEditId = b.dataset.edit; renderMaoDeObra(); });
+  box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "maoDeObra", b.dataset.del)); });
 }
 
 // =====================================================================
@@ -354,55 +458,44 @@ function renderTabelas() {
   const tipo = t?.tipo || "margem";
 
   el.innerHTML = `
-    <div class="split">
-      <div class="card">
-        <h3 style="margin-bottom:16px;">${tabelaEditId ? "Editar tabela" : "Nova tabela de preço"}</h3>
+    <div class="card cadastro-card">
+      <h3 style="margin-bottom:16px;">${tabelaEditId ? "Editar tabela" : "Nova tabela de preço"}</h3>
+      <div class="row-2">
         <div class="field"><label>Nome</label>
           <input id="tab-nome" placeholder="Ex: Tabela A, Marketplace" value="${esc(t?.nome || "")}" />
         </div>
         <div class="field"><label>Regra</label>
           <select id="tab-tipo">${TIPOS_TABELA.map((o) => `<option value="${o.value}" ${tipo === o.value ? "selected" : ""}>${o.label}</option>`).join("")}</select>
         </div>
-        <div id="tab-campos"></div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="tab-submit" style="flex:1">${tabelaEditId ? "Salvar" : "Adicionar"}</button>
-          ${tabelaEditId ? `<button class="btn btn-ghost" id="tab-cancel">Cancelar</button>` : ""}
-        </div>
       </div>
-      <div>
-        ${state.tabelas.length === 0
-          ? `<div class="empty"><div class="t">Nenhuma tabela cadastrada</div><div class="s">Crie a Tabela A, B, C ou Marketplace ao lado. Um exemplo de custo de R$ 100 aparece na coluna de teste.</div></div>`
-          : `<div class="table-wrap"><table>
-              <thead><tr><th>Tabela</th><th>Regra</th><th style="text-align:right">Exemplo (custo R$100)</th><th></th></tr></thead>
-              <tbody>
-                ${state.tabelas.map((tt) => `
-                  <tr>
-                    <td>${esc(tt.nome)}</td>
-                    <td style="color:var(--muted);font-size:12px;">${descricaoTabela(tt)}</td>
-                    <td class="num">${brl(calcPrecoTabela(tt, 100))}</td>
-                    <td><div class="actions-cell">
-                      <button class="icon-btn" data-edit="${tt.id}">✎</button>
-                      <button class="icon-btn danger" data-del="${tt.id}">🗑</button>
-                    </div></td>
-                  </tr>`).join("")}
-              </tbody>
-            </table></div>`
-        }
+      <div id="tab-campos"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="tab-submit">${tabelaEditId ? "Salvar" : "Adicionar"}</button>
+        ${tabelaEditId ? `<button class="btn btn-ghost" id="tab-cancel">Cancelar</button>` : ""}
       </div>
-    </div>`;
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+      ${renderBarraBusca("tabelas", [
+        { value: "nome-asc", label: "Nome (A–Z)" },
+        { value: "nome-desc", label: "Nome (Z–A)" },
+      ], "Buscar tabela…")}
+      <button class="btn btn-ghost" id="imprimir-tudo">🖨 Imprimir tabela de preços</button>
+    </div>
+    <div id="tabelas-lista"></div>`;
 
   function renderCampos(tipoAtual) {
     const campos = el.querySelector("#tab-campos");
     if (tipoAtual === "multiplicador") {
-      campos.innerHTML = `<div class="field"><label>Multiplicador (ex: 2 para o dobro do custo)</label><input id="tab-valor" value="${t?.valor ?? 2}" /></div>`;
+      campos.innerHTML = `<div class="field" style="max-width:320px;"><label>Multiplicador (ex: 2 para o dobro do custo)</label><input id="tab-valor" value="${t?.valor ?? 2}" /></div>`;
     } else if (tipoAtual === "marketplace") {
       campos.innerHTML = `
-        <div class="row-2">
+        <div class="row-2" style="max-width:460px;">
           <div class="field"><label>Comissão (%)</label><input id="tab-comissao" value="${t?.comissao ?? 16}" /></div>
           <div class="field"><label>Margem (%)</label><input id="tab-margem" value="${t?.margem ?? 20}" /></div>
         </div>`;
     } else {
-      campos.innerHTML = `<div class="field"><label>Margem sobre o preço (%)</label><input id="tab-valor" value="${t?.valor ?? 30}" /></div>`;
+      campos.innerHTML = `<div class="field" style="max-width:320px;"><label>Margem sobre o preço (%)</label><input id="tab-valor" value="${t?.valor ?? 30}" /></div>`;
     }
   }
   renderCampos(tipo);
@@ -424,8 +517,44 @@ function renderTabelas() {
     tabelaEditId = null;
   };
   el.querySelector("#tab-cancel")?.addEventListener("click", () => { tabelaEditId = null; renderTabelas(); });
-  el.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { tabelaEditId = b.dataset.edit; renderTabelas(); });
-  el.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "tabelasPreco", b.dataset.del)); });
+  el.querySelector("#imprimir-tudo").onclick = () => imprimirTabelaGeral();
+  ligarBarraBusca(el, "tabelas", renderListaTabelasCadastradas);
+  renderListaTabelasCadastradas();
+}
+
+function renderListaTabelasCadastradas() {
+  const box = document.getElementById("tabelas-lista");
+  if (!box) return;
+  const lista = aplicarBuscaOrdem(state.tabelas, "tabelas", ["nome"], {
+    nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"),
+  });
+
+  if (state.tabelas.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nenhuma tabela cadastrada</div><div class="s">Crie a Tabela A, B, C ou Marketplace acima. Um exemplo de custo de R$ 100 aparece na coluna de teste.</div></div>`;
+    return;
+  }
+  if (lista.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nada encontrado</div><div class="s">Tente outro termo de busca.</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Tabela</th><th>Regra</th><th style="text-align:right">Exemplo (custo R$100)</th><th></th></tr></thead>
+      <tbody>
+        ${lista.map((tt) => `
+          <tr>
+            <td>${esc(tt.nome)}</td>
+            <td style="color:var(--muted);font-size:12px;">${descricaoTabela(tt)}</td>
+            <td class="num">${brl(calcPrecoTabela(tt, 100))}</td>
+            <td><div class="actions-cell">
+              <button class="icon-btn" data-edit="${tt.id}">✎</button>
+              <button class="icon-btn danger" data-del="${tt.id}">🗑</button>
+            </div></td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+
+  box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { tabelaEditId = b.dataset.edit; renderTabelas(); });
+  box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await deleteDoc(doc(db, "tabelasPreco", b.dataset.del)); });
 }
 
 function descricaoTabela(t) {
@@ -602,7 +731,7 @@ function calcPrecoTabela(tabela, custoTotal) {
 }
 
 function novaVariacao(nome) {
-  return { id: uidTmp(), nome: nome || "Novo tamanho", itensMaterial: [], itensMao: [], overridesMaterial: {}, overridesMao: {} };
+  return { id: uidTmp(), nome: nome || "Novo tamanho", codigo: "", itensMaterial: [], itensMao: [], overridesMaterial: {}, overridesMao: {} };
 }
 
 function renderProdutos() {
@@ -614,49 +743,72 @@ function renderProdutos() {
   }
 
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;margin-bottom:16px;gap:8px;">
-      <button class="btn btn-ghost" id="imprimir-tudo">🖨 Imprimir tabela de preços</button>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
       <button class="btn btn-primary" id="novo-produto">+ Novo produto</button>
     </div>
-    ${state.produtos.length === 0
-      ? `<div class="empty"><div class="t">Nenhum produto cadastrado</div><div class="s">Cadastre materiais e mão de obra primeiro, depois monte seu produto aqui.</div></div>`
-      : `<div class="produtos-grid">
-          ${state.produtos.map((p) => {
-            const variacoes = p.variacoes && p.variacoes.length ? p.variacoes : [];
-            const custos = variacoes.map((v) => calcVariacao(p, v).total);
-            const min = custos.length ? Math.min(...custos) : 0;
-            const max = custos.length ? Math.max(...custos) : 0;
-            return `<button class="produto-card" data-open="${p.id}">
-              <div class="top"><h4>${esc(p.nome)}</h4><span style="color:var(--faint)">›</span></div>
-              <div class="meta">${variacoes.length} tamanho${variacoes.length === 1 ? "" : "s"} · custo</div>
-              <div class="price">${custos.length === 0 ? "—" : min === max ? brl(min) : `${brl(min)} – ${brl(max)}`}</div>
-            </button>`;
-          }).join("")}
-        </div>`
-    }`;
+    ${renderBarraBusca("produtos", [
+      { value: "nome-asc", label: "Nome (A–Z)" },
+      { value: "nome-desc", label: "Nome (Z–A)" },
+    ], "Buscar produto ou código…")}
+    <div id="produtos-lista"></div>`;
 
   el.querySelector("#novo-produto").onclick = () => {
     produtoEditorId = "new";
-    draft = { nome: "", indiretos: 0, itensMaterialGerais: [], itensMaoGerais: [], variacoes: [novaVariacao("Tamanho único")] };
+    draft = { nome: "", codigo: "", indiretos: 0, itensMaterialGerais: [], itensMaoGerais: [], variacoes: [novaVariacao("Tamanho único")] };
     renderProdutos();
   };
-  el.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => {
+  ligarBarraBusca(el, "produtos", renderListaProdutosCadastrados);
+  renderListaProdutosCadastrados();
+}
+
+function renderListaProdutosCadastrados() {
+  const box = document.getElementById("produtos-lista");
+  if (!box) return;
+  const lista = aplicarBuscaOrdem(state.produtos, "produtos", ["nome", "codigo"], {
+    nome: (a, b) => a.nome.localeCompare(b.nome, "pt-BR"),
+  });
+
+  if (state.produtos.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nenhum produto cadastrado</div><div class="s">Cadastre materiais e mão de obra primeiro, depois monte seu produto aqui.</div></div>`;
+    return;
+  }
+  if (lista.length === 0) {
+    box.innerHTML = `<div class="empty"><div class="t">Nada encontrado</div><div class="s">Tente outro termo de busca.</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="produtos-grid">
+      ${lista.map((p) => {
+        const variacoes = p.variacoes && p.variacoes.length ? p.variacoes : [];
+        const custos = variacoes.map((v) => calcVariacao(p, v).total);
+        const min = custos.length ? Math.min(...custos) : 0;
+        const max = custos.length ? Math.max(...custos) : 0;
+        return `<button class="produto-card" data-open="${p.id}">
+          <div class="top"><h4>${esc(p.nome)}</h4><span style="color:var(--faint)">›</span></div>
+          ${p.codigo ? `<div class="codigo-badge">${esc(p.codigo)}</div>` : ""}
+          <div class="meta">${variacoes.length} tamanho${variacoes.length === 1 ? "" : "s"} · custo</div>
+          <div class="price">${custos.length === 0 ? "—" : min === max ? brl(min) : `${brl(min)} – ${brl(max)}`}</div>
+        </button>`;
+      }).join("")}
+    </div>`;
+
+  box.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => {
     const p = state.produtos.find((x) => x.id === b.dataset.open);
     produtoEditorId = p.id;
     draft = JSON.parse(JSON.stringify(p));
+    if (!draft.codigo) draft.codigo = "";
     if (!draft.variacoes || draft.variacoes.length === 0) draft.variacoes = [novaVariacao("Tamanho único")];
     if (!draft.itensMaterialGerais) draft.itensMaterialGerais = [];
     if (!draft.itensMaoGerais) draft.itensMaoGerais = [];
-    // compatibilidade com produtos salvos antes dos ajustes por tamanho existirem
+    // compatibilidade com produtos salvos antes dos ajustes por tamanho / código existirem
     draft.itensMaterialGerais.forEach((it) => { if (!it.id) it.id = uidTmp(); });
     draft.itensMaoGerais.forEach((it) => { if (!it.id) it.id = uidTmp(); });
     draft.variacoes.forEach((v) => {
       if (!v.overridesMaterial) v.overridesMaterial = {};
       if (!v.overridesMao) v.overridesMao = {};
+      if (v.codigo === undefined) v.codigo = "";
     });
     renderProdutos();
   });
-  el.querySelector("#imprimir-tudo").onclick = () => imprimirTabelaGeral();
 }
 
 // gera o HTML de uma lista de itens (materiais OU mão de obra), reutilizado tanto
@@ -666,7 +818,7 @@ function renderListaMateriais(itens, scopeAttr) {
   return itens.map((it, iIdx) => {
     const m = state.materiais.find((x) => x.id === it.materialId);
     return `<div class="item-row">
-      <select ${scopeAttr} data-mat-idx="${iIdx}">${state.materiais.map((mm) => `<option value="${mm.id}" ${mm.id === it.materialId ? "selected" : ""}>${esc(mm.nome)} (${brl(mm.custoUnitario)}/${mm.unidade})</option>`).join("")}</select>
+      <select ${scopeAttr} data-mat-idx="${iIdx}">${state.materiais.map((mm) => `<option value="${mm.id}" ${mm.id === it.materialId ? "selected" : ""}>${esc(mm.nome)} (${brl5(mm.custoUnitario)}/${mm.unidade})</option>`).join("")}</select>
       <input class="qty" ${scopeAttr} data-mat-qty="${iIdx}" value="${it.quantidade}" />
       <span class="unit">${m?.unidade || ""}</span>
       <button class="icon-btn danger" ${scopeAttr} data-mat-del="${iIdx}">🗑</button>
@@ -678,7 +830,7 @@ function renderListaMao(itens, scopeAttr) {
   return itens.map((it, iIdx) => {
     const l = state.maoDeObra.find((x) => x.id === it.itemId);
     return `<div class="item-row">
-      <select ${scopeAttr} data-mao-idx="${iIdx}">${state.maoDeObra.map((ll) => `<option value="${ll.id}" ${ll.id === it.itemId ? "selected" : ""}>${esc(ll.nome)} (${brl(ll.valor)}/${ll.unidade})</option>`).join("")}</select>
+      <select ${scopeAttr} data-mao-idx="${iIdx}">${state.maoDeObra.map((ll) => `<option value="${ll.id}" ${ll.id === it.itemId ? "selected" : ""}>${esc(ll.nome)} (${brl5(ll.valor)}/${ll.unidade})</option>`).join("")}</select>
       <input class="qty" ${scopeAttr} data-mao-qty="${iIdx}" value="${it.quantidade}" />
       <span class="unit">${l?.unidade || ""}</span>
       <button class="icon-btn danger" ${scopeAttr} data-mao-del="${iIdx}">🗑</button>
@@ -732,7 +884,8 @@ function renderProdutoEditor(el) {
     return `
     <div class="variacao-card" data-var="${vIdx}">
       <div class="variacao-head">
-        <input data-var-nome="${vIdx}" value="${esc(v.nome)}" placeholder="Ex: 1,40 x 2,20m" />
+        <input data-var-nome="${vIdx}" value="${esc(v.nome)}" placeholder="Ex: 1,40 x 2,20m" style="flex:2;" />
+        <input data-var-codigo="${vIdx}" value="${esc(v.codigo || "")}" placeholder="Código interno" style="flex:1;" />
         <button class="icon-btn" data-var-dup="${vIdx}" title="Duplicar tamanho">⧉</button>
         ${p.variacoes.length > 1 ? `<button class="icon-btn danger" data-var-del="${vIdx}" title="Excluir tamanho">🗑</button>` : ""}
       </div>
@@ -750,7 +903,7 @@ function renderProdutoEditor(el) {
       ${renderAjustesGerais(p, v, vIdx)}
 
       <div class="mini-ficha">
-        <div><span class="l">Custo ${esc(v.nome)} (geral + específico)</span><br/><span class="c">${brl(calc.total)}</span></div>
+        <div><span class="l">Custo ${esc(v.nome)} (geral + específico)</span><br/><span class="c">${brl(calc.total)}${v.codigo ? ` · código ${esc(v.codigo)}` : ""}</span></div>
       </div>
       <div class="tabelas-precos">
         ${state.tabelas.length === 0
@@ -764,12 +917,19 @@ function renderProdutoEditor(el) {
   el.innerHTML = `
     <div class="card">
       <div class="editor-top">
-        <div class="field" style="margin:0;min-width:240px;">
-          <label>Nome do produto</label>
-          <input id="prod-nome" placeholder="Ex: Cortina corta luz" value="${esc(p.nome)}" />
+        <div class="row-2" style="flex:1;">
+          <div class="field" style="margin:0;">
+            <label>Nome do produto</label>
+            <input id="prod-nome" placeholder="Ex: Cortina corta luz" value="${esc(p.nome)}" />
+          </div>
+          <div class="field" style="margin:0;">
+            <label>Código interno (opcional)</label>
+            <input id="prod-codigo" placeholder="Ex: CORT-CL" value="${esc(p.codigo || "")}" />
+          </div>
         </div>
         <button class="icon-btn" id="prod-close" style="border:none;">✕</button>
       </div>
+      <p class="italic-muted" style="padding-top:0;">Se cada tamanho tiver um código próprio no seu sistema de vendas, preencha o código dentro de cada tamanho abaixo — ele tem prioridade sobre este.</p>
 
       <div class="field" style="margin-bottom:20px;max-width:220px;">
         <label>Custos indiretos (%)</label><input id="prod-indiretos" value="${p.indiretos}" />
@@ -805,20 +965,24 @@ function renderProdutoEditor(el) {
 
   const syncSimple = () => {
     draft.nome = el.querySelector("#prod-nome").value;
+    draft.codigo = el.querySelector("#prod-codigo").value;
     draft.indiretos = el.querySelector("#prod-indiretos").value;
   };
   el.querySelector("#prod-indiretos").addEventListener("input", () => { syncSimple(); renderProdutoEditor(el); });
   el.querySelector("#prod-nome").addEventListener("input", () => { draft.nome = el.querySelector("#prod-nome").value; });
+  el.querySelector("#prod-codigo").addEventListener("input", () => { draft.codigo = el.querySelector("#prod-codigo").value; });
   el.querySelector("#prod-close").onclick = () => { produtoEditorId = null; draft = null; renderProdutos(); };
 
   el.querySelector("#add-tamanho").onclick = () => { draft.variacoes.push(novaVariacao(`Tamanho ${draft.variacoes.length + 1}`)); renderProdutoEditor(el); };
 
   el.querySelectorAll("[data-var-nome]").forEach((i) => i.addEventListener("input", () => { draft.variacoes[+i.dataset.varNome].nome = i.value; }));
+  el.querySelectorAll("[data-var-codigo]").forEach((i) => i.addEventListener("input", () => { draft.variacoes[+i.dataset.varCodigo].codigo = i.value; }));
   el.querySelectorAll("[data-var-dup]").forEach((b) => b.onclick = () => {
     const v = draft.variacoes[+b.dataset.varDup];
     const copia = JSON.parse(JSON.stringify(v));
     copia.id = uidTmp();
     copia.nome = v.nome + " (cópia)";
+    copia.codigo = "";
     draft.variacoes.splice(+b.dataset.varDup + 1, 0, copia);
     renderProdutoEditor(el);
   });
@@ -890,11 +1054,13 @@ function renderProdutoEditor(el) {
     syncSimple();
     const payload = {
       nome: draft.nome.trim() || "Produto sem nome",
+      codigo: (draft.codigo || "").trim(),
       indiretos: numOr0(draft.indiretos),
       itensMaterialGerais: draft.itensMaterialGerais,
       itensMaoGerais: draft.itensMaoGerais,
       variacoes: draft.variacoes.map((v) => ({
         nome: v.nome.trim() || "Tamanho",
+        codigo: (v.codigo || "").trim(),
         itensMaterial: v.itensMaterial,
         itensMao: v.itensMao,
         overridesMaterial: v.overridesMaterial || {},
@@ -938,7 +1104,7 @@ function imprimirProduto(produto) {
     const precosTabela = state.tabelas.map((t) => `<tr><td>${esc(t.nome)}</td><td class="num" colspan="2">${brl(calcPrecoTabela(t, c.total))}</td></tr>`).join("");
     return `
       <div class="print-block">
-        <h3 style="font-family:'Fraunces',serif;margin-bottom:8px;">${esc(produto.nome)} — ${esc(v.nome)}</h3>
+        <h3 style="font-family:'Fraunces',serif;margin-bottom:8px;">${esc(produto.nome)} — ${esc(v.nome)}${(v.codigo || produto.codigo) ? ` <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#555;">[${esc(v.codigo || produto.codigo)}]</span>` : ""}</h3>
         <table class="print-table">
           <thead><tr><th>Item</th><th class="num">Qtd.</th><th class="num">Subtotal</th></tr></thead>
           <tbody>${gerais}${especificos}</tbody>
@@ -963,10 +1129,11 @@ function imprimirTabelaGeral() {
   const tabelas = state.tabelas;
   const headerTabelas = tabelas.map((t) => `<th class="num">${esc(t.nome)}</th>`).join("");
   const rows = state.produtos.flatMap((p) =>
-    (p.variacoes && p.variacoes.length ? p.variacoes : [{ nome: "—", itensMaterial: [], itensMao: [], overridesMaterial: {}, overridesMao: {} }]).map((v) => {
+    (p.variacoes && p.variacoes.length ? p.variacoes : [{ nome: "—", codigo: "", itensMaterial: [], itensMao: [], overridesMaterial: {}, overridesMao: {} }]).map((v) => {
       const c = calcVariacao(p, v);
       const precos = tabelas.map((t) => `<td class="num">${brl(calcPrecoTabela(t, c.total))}</td>`).join("");
-      return `<tr><td>${esc(p.nome)}</td><td>${esc(v.nome)}</td><td class="num">${brl(c.total)}</td>${precos}</tr>`;
+      const codigo = v.codigo || p.codigo || "";
+      return `<tr><td>${esc(codigo)}</td><td>${esc(p.nome)}</td><td>${esc(v.nome)}</td><td class="num">${brl(c.total)}</td>${precos}</tr>`;
     })
   ).join("");
 
@@ -974,7 +1141,7 @@ function imprimirTabelaGeral() {
     <div class="print-title">Plastnova — Tabela de preços</div>
     <div class="print-sub">Gerado em ${new Date().toLocaleDateString("pt-BR")}</div>
     <table class="print-table">
-      <thead><tr><th>Produto</th><th>Tamanho</th><th class="num">Custo</th>${headerTabelas}</tr></thead>
+      <thead><tr><th>Código</th><th>Produto</th><th>Tamanho</th><th class="num">Custo</th>${headerTabelas}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   document.getElementById("print-area").innerHTML = html;

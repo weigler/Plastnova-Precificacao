@@ -1,4 +1,4 @@
-const CACHE = "precificacao-v3";
+const CACHE = "precificacao-v4";
 const CORE_FILES = ["./", "./index.html", "./style.css", "./app.js", "./manifest.json", "./icon-192.png", "./icon-512.png", "./favicon.png"];
 
 self.addEventListener("install", (event) => {

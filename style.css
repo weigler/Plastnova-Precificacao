@@ -15,6 +15,23 @@
   --danger-bg: #3A1F1F;
 }
 
+:root[data-theme="light"] {
+  --bg: #EEF5FC;
+  --panel: #FFFFFF;
+  --panel-2: #E3EEF9;
+  --border: #C5D9EC;
+  --border-soft: #D7E5F3;
+  --ink: #0E2A47;
+  --ink-soft: #234B70;
+  --muted: #4F7196;
+  --muted-2: #6785A5;
+  --faint: #8CA6C0;
+  --gold: #1C86C7;
+  --gold-hover: #1670A8;
+  --danger: #C8514F;
+  --danger-bg: #FBE4E3;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -24,6 +41,7 @@ body {
   font-family: 'IBM Plex Sans', sans-serif;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s, color 0.15s;
 }
 
 .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
@@ -37,8 +55,8 @@ h1, h3, h4 { font-family: 'Fraunces', serif; margin: 0; font-weight: 500; }
 .title-row { display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
-.title-row h1 { font-size: 26px; color: var(--ink); display: flex; align-items: baseline; gap: 10px; }
-.brand-sub { font-size: 15px; color: var(--muted); font-family: 'IBM Plex Sans', sans-serif; font-weight: 400; }
+.title-row h1 { font-size: 26px; color: var(--ink); display: flex; align-items: baseline; gap: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.brand-sub { font-size: 15px; color: var(--muted); font-family: 'IBM Plex Sans', sans-serif; font-weight: 400; text-transform: none; letter-spacing: normal; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 .header-actions .icon-btn { font-size: 15px; padding: 7px 11px; }
 
@@ -52,7 +70,7 @@ h1, h3, h4 { font-family: 'Fraunces', serif; margin: 0; font-weight: 500; }
   padding: 34px 30px; text-align: center; background: var(--panel-2);
 }
 .login-logo { width: 68px; height: 68px; border-radius: 15px; object-fit: cover; margin-bottom: 12px; }
-.login-card h2 { font-size: 25px; color: var(--ink); }
+.login-card h2 { font-size: 25px; color: var(--ink); text-transform: uppercase; letter-spacing: 0.03em; }
 .login-sub { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; margin: 2px 0 22px; }
 .login-card .field { text-align: left; }
 .login-erro { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 10px; }
@@ -84,9 +102,27 @@ main.wrap { padding-top: 32px; padding-bottom: 64px; }
 .view { display: none; }
 .view.active { display: block; }
 
-/* layout grid: form + list */
-.split { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: start; }
-@media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+/* layout: cadastro no topo, lista abaixo */
+.split { display: flex; flex-direction: column; gap: 20px; }
+.cadastro-card { max-width: 620px; }
+
+.busca-bar { display: flex; gap: 8px; margin-bottom: 4px; flex: 1; }
+.busca-input {
+  flex: 1; max-width: 360px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 9px 13px; color: var(--ink); font-size: 15px; font-family: inherit; outline: none;
+}
+.busca-input::placeholder { color: var(--faint); }
+.busca-input:focus { border-color: var(--gold); }
+.busca-ordem {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 9px 10px; color: var(--muted); font-size: 14px; font-family: inherit; outline: none;
+}
+
+.codigo-badge {
+  display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: var(--gold); background: rgba(53,169,232,0.12); border-radius: 4px;
+  padding: 1px 7px; margin-top: 6px;
+}
 
 .card {
   border: 1px solid var(--border);
@@ -97,6 +133,10 @@ main.wrap { padding-top: 32px; padding-bottom: 64px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .field label {
   font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+}
+/* só nas linhas de 2 colunas o rótulo pode quebrar linha de forma desigual — aqui sim
+   reservamos altura fixa pra manter os dois inputs alinhados na mesma altura */
+.row-2 .field label {
   min-height: 2.4em; display: flex; align-items: flex-end; line-height: 1.2;
 }
 .field input, .field select {

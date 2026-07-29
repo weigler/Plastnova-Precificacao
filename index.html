@@ -11,6 +11,12 @@
 <link rel="icon" href="favicon.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="theme-color" content="#1B1F23" />
+<script>
+  (function () {
+    var t = localStorage.getItem("plastnova-tema");
+    if (t === "light") document.documentElement.setAttribute("data-theme", "light");
+  })();
+</script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -40,6 +46,7 @@
         </div>
         <div class="header-actions">
           <span id="status" class="status">conectando…</span>
+          <button id="btn-tema" class="icon-btn" title="Alternar tema claro/escuro">🌙</button>
           <button id="btn-logout" class="icon-btn" title="Sair">⎋</button>
         </div>
       </div>
