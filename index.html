@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Plastnova · Precificação</title>
+<meta name="description" content="Sistema de precificação de produtos Plastnova" />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="favicon.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="theme-color" content="#1B1F23" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <img src="icon-192.png" alt="Plastnova" class="login-logo" />
+    <h2>Plastnova</h2>
+    <p class="login-sub">Precificação</p>
+    <div class="field"><label>E-mail</label><input id="login-email" type="email" autocomplete="username" /></div>
+    <div class="field"><label>Senha</label><input id="login-senha" type="password" autocomplete="current-password" /></div>
+    <button id="login-btn" class="btn btn-primary" style="width:100%;">Entrar</button>
+    <p id="login-erro" class="login-erro"></p>
+  </div>
+</div>
+
+<div id="app-shell" style="display:none;">
+  <header class="app-header">
+    <div class="wrap">
+      <div class="title-row">
+        <div class="brand">
+          <img src="icon-192.png" alt="Plastnova" class="brand-mark" />
+          <h1>Plastnova <span class="brand-sub">Precificação</span></h1>
+        </div>
+        <div class="header-actions">
+          <span id="status" class="status">conectando…</span>
+          <button id="btn-backup" class="icon-btn" title="Exportar backup">⬇</button>
+          <button id="btn-restore" class="icon-btn" title="Importar backup">⬆</button>
+          <button id="btn-logout" class="icon-btn" title="Sair">⎋</button>
+        </div>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="produtos"><span class="tab-index">01</span>Produtos</button>
+        <button class="tab" data-tab="materiais"><span class="tab-index">02</span>Materiais</button>
+        <button class="tab" data-tab="maoDeObra"><span class="tab-index">03</span>Mão de obra</button>
+        <button class="tab" data-tab="tabelas"><span class="tab-index">04</span>Tabelas de preço</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="view-produtos" class="view active"></section>
+    <section id="view-materiais" class="view"></section>
+    <section id="view-maoDeObra" class="view"></section>
+    <section id="view-tabelas" class="view"></section>
+  </main>
+</div>
+
+<input type="file" id="backup-file" accept="application/json" style="display:none" />
+<div id="print-area"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
